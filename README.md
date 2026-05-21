@@ -4,9 +4,33 @@
 
 See your **5-hour** and **7-day** subscription limits at a glance — without opening a terminal, refreshing a webpage, or guessing whether you're about to hit a wall in the middle of a long run.
 
-![claude-watch screenshot](assets/screenshot.png)
+<img src="assets/screenshot.png" alt="claude-watch screenshot" width="500">
 
-![tray icon](https://img.shields.io/badge/platform-Linux%20(GNOME%2FKDE)%20%7C%20macOS-blue) ![language](https://img.shields.io/badge/language-Go-00ADD8)
+![tray icon](https://img.shields.io/badge/platform-Linux%20(GNOME%2FKDE)-blue) ![language](https://img.shields.io/badge/language-Go-00ADD8)
+
+---
+
+## Quick start
+
+**Install** (Linux, amd64 or arm64):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jrlucier/claude-watch/main/install.sh | sh
+```
+
+Then:
+
+```bash
+claude-watch start
+```
+
+**Uninstall:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jrlucier/claude-watch/main/install.sh | sh -s -- --uninstall
+```
+
+See [Install](#install) for the full breakdown (manual download, building from source, environment overrides) and [Requirements](#requirements) if you're on GNOME and the tray icon doesn't appear.
 
 ---
 
@@ -64,7 +88,7 @@ When the `claude` CLI refreshes its OAuth token, `claude-watch` notices via `fsn
 
 ## Requirements
 
-- **Linux** (GNOME, KDE Plasma, or any desktop with a system tray) — or **macOS**
+- **Linux** (GNOME, KDE Plasma, or any desktop with a system tray)
 - **Go 1.26+** to build from source
 - An active **Claude Code** subscription with credentials at `~/.claude/.credentials.json` (created automatically the first time you run `claude` and sign in)
 
@@ -93,23 +117,65 @@ Then log out and back in once so GNOME picks it up.
 
 ## Install
 
-### Build from source
+### Option 1: One-line install (recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jrlucier/claude-watch/main/install.sh | sh
+```
+
+That's it. The script:
+
+- detects your CPU architecture (amd64 or arm64),
+- downloads the matching binary from the [latest GitHub release](https://github.com/jrlucier/claude-watch/releases/latest),
+- verifies the SHA-256 checksum,
+- installs it to `~/.local/bin/claude-watch`,
+- prompts you (on systemd-based distros) to set up **auto-start on login**.
+
+**Environment overrides:**
+
+```bash
+INSTALL_DIR=/usr/local/bin sudo -E sh -c "$(curl -fsSL https://raw.githubusercontent.com/jrlucier/claude-watch/main/install.sh)"
+VERSION=v0.1.0 sh install.sh             # pin to a specific release
+CLAUDE_WATCH_AUTOSTART=yes sh install.sh  # skip the auto-start prompt and just do it
+CLAUDE_WATCH_AUTOSTART=no  sh install.sh  # skip the prompt and don't auto-start
+```
+
+If `~/.local/bin` isn't on your `$PATH`, the script will tell you and print the exact line to add to your shell config.
+
+### Uninstall
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jrlucier/claude-watch/main/install.sh | sh -s -- --uninstall
+```
+
+Stops the daemon, disables and removes the systemd user unit, and deletes the binary. You'll be prompted whether to also remove your config (`~/.config/claude-watch`) and logs (`~/.local/state/claude-watch`) — answer "no" to keep them around for a future reinstall. Use `CLAUDE_WATCH_PURGE=yes` to skip that prompt and wipe everything.
+
+### Option 2: Download manually
+
+Grab the archive for your CPU from [**Releases**](https://github.com/jrlucier/claude-watch/releases/latest):
+
+| Your system | Download |
+|---|---|
+| Linux (Intel/AMD) | `claude-watch-vX.Y.Z-linux-amd64.tar.gz` |
+| Linux (ARM64) | `claude-watch-vX.Y.Z-linux-arm64.tar.gz` |
+
+```bash
+tar -xzf claude-watch-v0.1.0-linux-amd64.tar.gz
+install -m 0755 claude-watch ~/.local/bin/
+```
+
+### Option 3: Build from source
+
+Requires **Go 1.26+**.
 
 ```bash
 git clone https://github.com/jrlucier/claude-watch
 cd claude-watch
 make build
-```
-
-This produces `bin/claude-watch`. Drop it on your `$PATH`:
-
-```bash
 install -m 0755 bin/claude-watch ~/.local/bin/
 ```
 
-(Make sure `~/.local/bin` is on your `$PATH`. Most distros add it automatically.)
-
-### Verify
+### Verify it's installed
 
 ```bash
 claude-watch version
@@ -180,7 +246,13 @@ You can also toggle `label_mode` from the **Settings** submenu on the tray icon 
 
 ## Auto-start on login
 
-### Linux (systemd user unit)
+> The [one-line installer](#option-1-one-line-install-recommended) will offer to do all of this for you. The steps below are if you want to set it up manually.
+
+The unit assumes the binary lives at `~/.local/bin/claude-watch`. If you haven't already, install it there:
+
+```bash
+install -m 0755 bin/claude-watch ~/.local/bin/
+```
 
 Create `~/.config/systemd/user/claude-watch.service`:
 
@@ -197,15 +269,20 @@ Restart=on-failure
 WantedBy=default.target
 ```
 
-Then enable it:
+Then enable and start it:
 
 ```bash
+systemctl --user daemon-reload
 systemctl --user enable --now claude-watch
 ```
 
-### macOS
+Verify:
 
-Use a [LaunchAgent](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html) (`~/Library/LaunchAgents/com.jrlucier.claude-watch.plist`) running `claude-watch start --foreground`, or just add `claude-watch start` to your shell's login script.
+```bash
+systemctl --user status claude-watch
+```
+
+> **If it fails with `status=203/EXEC`:** systemd can't find the binary at `~/.local/bin/claude-watch`. Re-run the `install` command above, then `systemctl --user reset-failed claude-watch && systemctl --user start claude-watch`.
 
 ---
 
