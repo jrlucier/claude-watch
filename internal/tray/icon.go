@@ -58,22 +58,27 @@ var digitColor = color.NRGBA{0xff, 0xff, 0xff, 0xff}
 // far more common dark panels.
 var digitOutline = color.NRGBA{0x00, 0x00, 0x00, 0xa8}
 
-// RenderBars produces the tray icon: a single big number (the 5-hour
-// utilization percentage) in neutral text, plus a colored severity dot in
-// the bottom-right corner — the dot is what tells the user how urgent it is.
+// RenderBars produces the tray icon: a big 5-hour percentage number in
+// neutral text, with a colored severity bar underneath it. When labelMode is
+// "both" we also paint a top bar carrying the 7-day severity color — so the
+// icon shows both signals at a glance whenever the panel label is showing
+// both percentages too.
 //
-//	fiveH:  percentage 0-100 (clamped).
-//	sevenD: accepted for API symmetry but unused in the icon.
-//	stale:  when true, the digit & dot dim to indicate the API hasn't refreshed.
-//	hasAPI: when false, the icon renders "?" in gray — there's no value to show.
-func RenderBars(fiveH, _ float64, stale, hasAPI bool) ([]byte, error) {
+//	fiveH:     5h utilization percentage 0-100 (clamped).
+//	sevenD:    7d utilization percentage 0-100 (drives the top bar in "both" mode).
+//	stale:     when true, the digit & bars dim to indicate the API hasn't refreshed.
+//	hasAPI:    when false, the icon renders "?" in gray — there's no value to show.
+//	labelMode: "5h" (bottom bar only) or "both" (bottom + top bars).
+func RenderBars(fiveH, sevenD float64, stale, hasAPI bool, labelMode string) ([]byte, error) {
 	img := image.NewNRGBA(image.Rect(0, 0, iconHeight, iconHeight))
 
 	var label string
 	var sev Severity
+	var sev7 Severity
 	if !hasAPI {
 		label = "?"
 		sev = SevUnknown
+		sev7 = SevUnknown
 	} else {
 		pct := int(fiveH + 0.5)
 		if pct < 0 {
@@ -84,35 +89,44 @@ func RenderBars(fiveH, _ float64, stale, hasAPI bool) ([]byte, error) {
 		}
 		label = pctLabel(pct)
 		sev = SeverityFor(fiveH)
+		sev7 = SeverityFor(sevenD)
 	}
 
 	textCol := digitColor
-	dotCol := sevColor[sev]
+	barCol := sevColor[sev]
+	bar7Col := sevColor[sev7]
 	// Dimming signals "data is old". When we have no data at all the icon
 	// already shows "?" — dimming on top would just make the glyph hard to
 	// read. So only dim when hasAPI && stale.
 	if stale && hasAPI {
 		textCol = dim(textCol)
-		dotCol = dim(dotCol)
+		barCol = dim(barCol)
+		bar7Col = dim(bar7Col)
 	}
 
-	// Layout: digit centered, with a colored underline at the bottom of the
-	// canvas as the severity indicator. This keeps the digit at full size
-	// while still surfacing the color signal.
-	const lineH = 8      // underline thickness, px
-	const lineMargin = 6 // px clear on left and right
-	const lineBottom = 3 // px between underline and canvas bottom
+	// Layout constants. The bars sit at the top and/or bottom; the digit
+	// occupies the middle band.
+	const lineH = 8       // bar thickness, px
+	const lineMargin = 6  // px clear on left and right of each bar
+	const lineEdgePad = 3 // px between a bar and the nearest canvas edge
+	const topGap = 4      // extra breathing room between top bar and digit
+
+	showTop := labelMode == "both"
 
 	// Lock the font size to what's right for a 2-digit value ("88" is the
 	// widest pair). Single-digit and "?" then render at the same height as
-	// a 2-digit reading. The full width is available for digits; the only
-	// vertical reservation is the underline plus padding.
+	// a 2-digit reading. Available digit height shrinks when we also have a
+	// top bar competing for vertical space.
 	ref := label
 	if len(label) < 2 {
 		ref = "88"
 	}
+	reserved := lineH + lineEdgePad + 2 // bottom bar + padding
+	if showTop {
+		reserved += lineH + lineEdgePad + topGap
+	}
 	digitW := iconHeight - 4
-	digitH := iconHeight - (lineH + lineBottom + 2)
+	digitH := iconHeight - reserved
 	// 0.92× shaves a couple of pixels off the max-fit height so the digits
 	// don't push right up against the icon edges; it reads as more
 	// considered than "as big as possible."
@@ -123,13 +137,22 @@ func RenderBars(fiveH, _ float64, stale, hasAPI bool) ([]byte, error) {
 	}
 	textW := drawTextWidth(label, size)
 	textX := (iconHeight - textW) / 2
-	// Shift the visual centre of the text upward by half the reserved
-	// underline strip so the digit sits centred within the *remaining*
-	// canvas, not the whole canvas — otherwise it visually drifts down
-	// against the line.
-	drawTextOffsetY(img, label, size, textX, -(lineH+lineBottom)/2, textCol, outline)
+	// Shift the visual centre of the text against the *remaining* canvas
+	// (not the whole canvas), so the digit reads as centered between the
+	// bars rather than drifting toward the line(s).
+	yOffset := -(lineH + lineEdgePad) / 2
+	if showTop {
+		// Push the digit down so there's deliberate space between the top
+		// bar and the cap line — otherwise the digit clings to the top bar
+		// in a way that reads as cramped.
+		yOffset = topGap / 2
+	}
+	drawTextOffsetY(img, label, size, textX, yOffset, textCol, outline)
 
-	drawUnderline(img, lineMargin, iconHeight-lineBottom-lineH, iconHeight-lineMargin, iconHeight-lineBottom, dotCol)
+	drawUnderline(img, lineMargin, iconHeight-lineEdgePad-lineH, iconHeight-lineMargin, iconHeight-lineEdgePad, barCol)
+	if showTop {
+		drawUnderline(img, lineMargin, lineEdgePad, iconHeight-lineMargin, lineEdgePad+lineH, bar7Col)
+	}
 
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {

@@ -64,7 +64,7 @@ func RunWith(actions Actions, ready func(*Tray)) {
 }
 
 func (t *Tray) onReady() {
-	t.applyIcon(0, 0, true, false) // grey "waiting" state until first snapshot
+	t.applyIcon(0, 0, true, false, "5h") // grey "waiting" state until first snapshot
 	systray.SetTitle("…")
 	systray.SetTooltip("claude-watch — initializing")
 
@@ -150,7 +150,7 @@ func (t *Tray) Refresh() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.applyIcon(snap.FiveHour.Utilization, snap.SevenDay.Utilization, snap.APIStale, snap.HasAPI)
+	t.applyIcon(snap.FiveHour.Utilization, snap.SevenDay.Utilization, snap.APIStale, snap.HasAPI, snap.LabelMode)
 	systray.SetTitle(buildTitle(snap))
 	systray.SetTooltip(buildTooltip(snap))
 
@@ -202,8 +202,8 @@ func (t *Tray) Refresh() {
 }
 
 // applyIcon renders the tray icon and pushes it via SetIcon.
-func (t *Tray) applyIcon(fiveH, sevenD float64, stale, hasAPI bool) {
-	icon, err := RenderBars(fiveH, sevenD, stale, hasAPI)
+func (t *Tray) applyIcon(fiveH, sevenD float64, stale, hasAPI bool, labelMode string) {
+	icon, err := RenderBars(fiveH, sevenD, stale, hasAPI, labelMode)
 	if err != nil {
 		log.Printf("warn: render icon: %v", err)
 		return
