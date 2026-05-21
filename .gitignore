@@ -1,0 +1,32 @@
+# Build output
+/bin/
+/dist/
+# Stray binary at repo root if someone runs `go build` without -o
+/claude-watch
+
+# Test / coverage / profiling
+*.test
+*.out
+coverage.*
+*.prof
+*.pprof
+
+# Local Go workspace files (not shared between devs)
+/go.work
+/go.work.sum
+
+# Environment / secrets — never commit
+.env
+.env.*
+.envrc
+
+# Editor scratch
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
