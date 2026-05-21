@@ -24,6 +24,8 @@ Then:
 claude-watch start
 ```
 
+> **Auto-start on login:** the installer will prompt you (on systemd-based Linux distros) to enable a user service so claude-watch starts automatically every time you log in. Answer `Y`. If you skipped the prompt, you can set it up by hand later — see [Auto-start on login](#auto-start-on-login).
+
 **Uninstall:**
 
 ```bash
