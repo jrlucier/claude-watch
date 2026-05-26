@@ -49,7 +49,7 @@ var sevColor = map[Severity]color.NRGBA{
 }
 
 // digitColor is the on-icon text color. White; severity is conveyed by the
-// corner dot, not the digit.
+// bar's fill length and color.
 var digitColor = color.NRGBA{0xff, 0xff, 0xff, 0xff}
 
 // digitOutline is painted as a 1px stroke around the white digits so they
@@ -57,6 +57,21 @@ var digitColor = color.NRGBA{0xff, 0xff, 0xff, 0xff}
 // into the background). Translucent so it doesn't add visual weight on the
 // far more common dark panels.
 var digitOutline = color.NRGBA{0x00, 0x00, 0x00, 0xa8}
+
+// trackColor is the default unfilled portion of the progress bar. Slate-400
+// (L≈0.65) tilts brighter than a true midtone — system trays are dark on
+// most desktops, so we trade a little contrast on light panels (where the
+// coloured fill still reads) for a clearly-visible track on the common
+// black panel.
+var trackColor = color.NRGBA{0x94, 0xa3, 0xb8, 0xff}
+
+// paceWarnTrack replaces trackColor on the 5h bar when pace is "hot": the
+// remaining capacity is the part actually in jeopardy at the current burn
+// rate, so colouring it electric blue says "this remaining budget is what
+// you're about to burn through." Saturated blue is complementary to every
+// severity colour (green/yellow/orange/red are all warm), so the fill/track
+// boundary stays crisp at any utilization%.
+var paceWarnTrack = color.NRGBA{0x0e, 0xa5, 0xe9, 0xff}
 
 // RenderBars produces the tray icon: a big 5-hour percentage number in
 // neutral text, with a colored severity bar underneath it. When labelMode is
@@ -69,7 +84,10 @@ var digitOutline = color.NRGBA{0x00, 0x00, 0x00, 0xa8}
 //	stale:     when true, the digit & bars dim to indicate the API hasn't refreshed.
 //	hasAPI:    when false, the icon renders "?" in gray — there's no value to show.
 //	labelMode: "5h" (bottom bar only) or "both" (bottom + top bars).
-func RenderBars(fiveH, sevenD float64, stale, hasAPI bool, labelMode string) ([]byte, error) {
+//	paceHot:   when true, an amber triangle sits in the top-right corner of the icon
+//	           — the "burning hot" pace flag. Suppressed by stale/!hasAPI since
+//	           pace classification is meaningless without fresh data.
+func RenderBars(fiveH, sevenD float64, stale, hasAPI bool, labelMode string, paceHot bool) ([]byte, error) {
 	img := image.NewNRGBA(image.Rect(0, 0, iconHeight, iconHeight))
 
 	var label string
@@ -149,9 +167,33 @@ func RenderBars(fiveH, sevenD float64, stale, hasAPI bool, labelMode string) ([]
 	}
 	drawTextOffsetY(img, label, size, textX, yOffset, textCol, outline)
 
-	drawUnderline(img, lineMargin, iconHeight-lineEdgePad-lineH, iconHeight-lineMargin, iconHeight-lineEdgePad, barCol)
+	// Bars are progress bars: filled portion = utilization% in severity colour,
+	// remaining portion = slate track. When pace is "hot", the 5h bar's track
+	// turns pink — colouring the *remaining* capacity is the point, since
+	// that's the budget the user is about to burn through. Top bar (7d) stays
+	// on the neutral track; pace is a 5h concept.
+	bottomTrack := trackColor
+	if paceHot && hasAPI && !stale {
+		bottomTrack = paceWarnTrack
+	}
+	if stale && hasAPI {
+		bottomTrack = dim(bottomTrack)
+	}
+	bottomPct := fiveH
+	if !hasAPI {
+		bottomPct = 0
+	}
+	drawProgressBar(img, lineMargin, iconHeight-lineEdgePad-lineH, iconHeight-lineMargin, iconHeight-lineEdgePad, bottomPct, barCol, bottomTrack)
 	if showTop {
-		drawUnderline(img, lineMargin, lineEdgePad, iconHeight-lineMargin, lineEdgePad+lineH, bar7Col)
+		topTrack := trackColor
+		if stale && hasAPI {
+			topTrack = dim(topTrack)
+		}
+		topPct := sevenD
+		if !hasAPI {
+			topPct = 0
+		}
+		drawProgressBar(img, lineMargin, lineEdgePad, iconHeight-lineMargin, lineEdgePad+lineH, topPct, bar7Col, topTrack)
 	}
 
 	var buf bytes.Buffer
@@ -176,18 +218,30 @@ func pctLabel(p int) string {
 
 func digit(n int) string { return string(rune('0' + n)) }
 
-// drawUnderline paints a filled horizontal bar with semi-rounded ends. The
-// rounding is just a 1-pixel chamfer at each corner — enough to read as
-// "rounded" at panel scale without burning cycles on full anti-aliased
-// quarter-circles.
-func drawUnderline(img *image.NRGBA, x0, y0, x1, y1 int, c color.NRGBA) {
+// drawProgressBar paints a horizontal bar split into a fill segment (left,
+// length proportional to pct) and a track segment (right, the remainder).
+// The outer corners get a 1-pixel chamfer for a "rounded" feel at panel
+// scale; the fill/track boundary is left sharp so the proportion stays
+// readable. pct is clamped to 0-100.
+func drawProgressBar(img *image.NRGBA, x0, y0, x1, y1 int, pct float64, fill, track color.NRGBA) {
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	width := x1 - x0
+	fillEnd := x0 + int(float64(width)*pct/100+0.5)
 	for y := y0; y < y1; y++ {
 		for x := x0; x < x1; x++ {
-			// Skip the four corner pixels for a soft chamfer.
 			leftCorner := x == x0 && (y == y0 || y == y1-1)
 			rightCorner := x == x1-1 && (y == y0 || y == y1-1)
 			if leftCorner || rightCorner {
 				continue
+			}
+			c := track
+			if x < fillEnd {
+				c = fill
 			}
 			blend(img, x, y, c)
 		}

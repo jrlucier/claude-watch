@@ -46,8 +46,10 @@ type Daemon struct {
 	refreshJSONLCh      chan struct{}
 	notifiedFiveH       map[int]time.Time // threshold % → time it last fired in the current 5h window
 	notifiedSevenD      map[int]time.Time
-	lastResetFiveH      time.Time
+	notifiedPaceHot     bool      // pace-hot notification fired in the current 5h window
+	lastResetFiveH      time.Time // tracks 5h reset for the threshold-notify map
 	lastResetSevenD     time.Time
+	lastPaceResetFiveH  time.Time // tracks 5h reset for the pace-hot latch (independent so neither maybeNotify path masks the other)
 	consecutiveFailures int
 }
 
@@ -272,16 +274,49 @@ func (d *Daemon) doJSONL() {
 	tokens := usage.BlockTokens(block.Records)
 	burn := usage.BurnRateTokensPerMin(block.Records, now)
 
-	// Forecast must use the *raw* API util — feeding the extrapolated value
-	// back through Forecast() would compound the projection on top of the
-	// projection. Skip the forecast entirely when we're stale; the menu
-	// already signals that with the "ℹ Estimated from local data" row.
+	// Forecast and pace state must use the *raw* API util — feeding the
+	// extrapolated value back through them would compound the projection
+	// on top of the projection. Skip both entirely when we're stale; the
+	// menu already signals that with the "ℹ Estimated from local data" row.
 	forecast := ""
+	pace := usage.PaceUnknown
 	raw, ok := d.state.RawAPI()
 	if ok {
 		forecast = usage.Forecast(raw.FiveHour.Utilization, raw.FiveHour.ResetsAt, burn, now)
+		pace = usage.ComputePace(raw.FiveHour.Utilization, burn, raw.FiveHour.ResetsAt, now)
 	}
-	d.state.UpdateLocal(burn, cost, tokens, perModel, forecast)
+	d.state.UpdateLocal(burn, cost, tokens, perModel, forecast, pace)
+	d.maybePaceNotify(pace, raw.FiveHour.ResetsAt, forecast)
+}
+
+// maybePaceNotify fires at most one "burning hot" desktop notification per
+// 5h window — independent of the utilization-threshold notifications. The
+// window-reset detection mirrors maybeNotify(): when resets_at advances past
+// the last known reset, the latch clears.
+func (d *Daemon) maybePaceNotify(cur usage.PaceState, resetsAt *time.Time, forecastNote string) {
+	if cur != usage.PaceHot {
+		return
+	}
+	d.mu.Lock()
+	if resetsAt != nil && resetsAt.After(d.lastPaceResetFiveH) {
+		d.notifiedPaceHot = false
+		d.lastPaceResetFiveH = *resetsAt
+	}
+	if d.notifiedPaceHot {
+		d.mu.Unlock()
+		return
+	}
+	d.notifiedPaceHot = true
+	n := d.notifier
+	d.mu.Unlock()
+	if n == nil {
+		return
+	}
+	body := "Burning hot at the current pace."
+	if forecastNote != "" {
+		body = "Burning hot — " + forecastNote + " at current pace."
+	}
+	n.Notify("Claude usage", body)
 }
 
 // watchCredentials triggers an immediate API re-poll on any change to the

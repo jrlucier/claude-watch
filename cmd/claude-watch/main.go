@@ -34,6 +34,8 @@ USAGE:
   claude-watch status [--json]        Print current snapshot (pretty by default).
   claude-watch refresh                Force an immediate refresh.
   claude-watch set-label 5h|both      Switch panel-label mode.
+  claude-watch set-time-format 12h|24h
+                                      Switch reset-time clock format.
   claude-watch quit                   Stop the daemon.
   claude-watch version                Print the build version (--version, -v).
 `
@@ -66,6 +68,15 @@ func main() {
 			fatal("set-label: value must be \"5h\" or \"both\"")
 		}
 		runSimple(ipc.CmdSetLabel, v)
+	case "set-time-format":
+		if len(rest) < 1 {
+			fatal("set-time-format requires an argument: 12h or 24h")
+		}
+		v := rest[0]
+		if v != "12h" && v != "24h" {
+			fatal("set-time-format: value must be \"12h\" or \"24h\"")
+		}
+		runSimple(ipc.CmdSetTimeFormat, v)
 	case "stop", "quit":
 		runStop()
 	default:
@@ -105,7 +116,7 @@ func runDaemon(args []string) {
 	rootCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	st := state.New(cfg.LabelMode)
+	st := state.New(cfg.LabelMode, cfg.TimeFormat)
 	st.LoadFromDisk() // restore last-good API snapshot from previous run
 	d, err := daemon.New(cfg, st)
 	if err != nil {
@@ -149,10 +160,11 @@ func runDaemon(args []string) {
 	}
 
 	actions := tray.Actions{
-		Snapshot:     st.Snapshot,
-		RefreshNow:   d.RefreshNow,
-		SetLabelMode: func(mode string) { setLabel(st, mode) },
-		Quit:         quit,
+		Snapshot:      st.Snapshot,
+		RefreshNow:    d.RefreshNow,
+		SetLabelMode:  func(mode string) { setLabel(st, mode) },
+		SetTimeFormat: func(f string) { setTimeFormat(st, f) },
+		Quit:          quit,
 	}
 	tray.RunWith(actions, func(t *tray.Tray) {
 		st.SetOnChange(t.Refresh)
@@ -170,6 +182,21 @@ func setLabel(st *state.State, mode string) {
 		cfg = config.Default()
 	}
 	cfg.LabelMode = mode
+	if err := config.Save(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "warn: save config: %v\n", err)
+	}
+}
+
+// setTimeFormat updates the in-memory state and persists the new clock
+// format ("12h" or "24h") to the config file.
+func setTimeFormat(st *state.State, format string) {
+	st.SetTimeFormat(format)
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warn: load config: %v\n", err)
+		cfg = config.Default()
+	}
+	cfg.TimeFormat = format
 	if err := config.Save(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "warn: save config: %v\n", err)
 	}
@@ -347,6 +374,11 @@ func makeHandler(st *state.State, d *daemon.Daemon, quit func(), cfg config.Conf
 				return ipc.Response{OK: false, Error: "set-label: value must be \"5h\" or \"both\""}, nil
 			}
 			setLabel(st, req.Value)
+		case ipc.CmdSetTimeFormat:
+			if req.Value != "12h" && req.Value != "24h" {
+				return ipc.Response{OK: false, Error: "set-time-format: value must be \"12h\" or \"24h\""}, nil
+			}
+			setTimeFormat(st, req.Value)
 		case ipc.CmdQuit:
 			resp.Snapshot = st.Snapshot()
 			go func() {

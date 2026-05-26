@@ -33,9 +33,11 @@ type State struct {
 	blockTokens      int64
 	blockCostByModel []ipc.CostBreakdown
 	forecast         string
+	paceState        usage.PaceState
 
 	// User preferences.
-	labelMode string
+	labelMode  string
+	timeFormat string // "12h" or "24h"
 
 	// Last refresh stamps either side touched.
 	lastUpdate time.Time
@@ -43,9 +45,9 @@ type State struct {
 	onChange func()
 }
 
-// New returns an empty State with the given initial label mode.
-func New(labelMode string) *State {
-	return &State{labelMode: labelMode}
+// New returns an empty State with the given initial preferences.
+func New(labelMode, timeFormat string) *State {
+	return &State{labelMode: labelMode, timeFormat: timeFormat}
 }
 
 // SetOnChange wires a single listener invoked after every successful update.
@@ -65,6 +67,23 @@ func (s *State) SetLabelMode(mode string) {
 		return
 	}
 	s.labelMode = mode
+	s.lastUpdate = time.Now()
+	cb := s.onChange
+	s.mu.Unlock()
+	if cb != nil {
+		cb()
+	}
+}
+
+// SetTimeFormat swaps the reset-time display format ("12h" or "24h") and
+// fires onChange.
+func (s *State) SetTimeFormat(format string) {
+	s.mu.Lock()
+	if format == s.timeFormat {
+		s.mu.Unlock()
+		return
+	}
+	s.timeFormat = format
 	s.lastUpdate = time.Now()
 	cb := s.onChange
 	s.mu.Unlock()
@@ -128,13 +147,14 @@ func (s *State) MarkAPIError(err error) {
 }
 
 // UpdateLocal records derived JSONL metrics.
-func (s *State) UpdateLocal(burnTokPerMin, blockCostUSD float64, blockTokens int64, perModel []usage.PerModel, forecast string) {
+func (s *State) UpdateLocal(burnTokPerMin, blockCostUSD float64, blockTokens int64, perModel []usage.PerModel, forecast string, paceState usage.PaceState) {
 	s.mu.Lock()
 	s.burnTokPerMin = burnTokPerMin
 	s.blockCostUSD = blockCostUSD
 	s.blockTokens = blockTokens
 	s.blockCostByModel = perModel2IPC(perModel)
 	s.forecast = forecast
+	s.paceState = paceState
 	s.lastUpdate = time.Now()
 	cb := s.onChange
 	s.mu.Unlock()
@@ -259,6 +279,13 @@ func (s *State) LabelMode() string {
 	return s.labelMode
 }
 
+// TimeFormat returns the current reset-time display format ("12h" or "24h").
+func (s *State) TimeFormat() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.timeFormat
+}
+
 // Snapshot returns an ipc.Snapshot — the same shape served back over IPC and
 // consumed by the tray.
 func (s *State) Snapshot() ipc.Snapshot {
@@ -269,7 +296,9 @@ func (s *State) Snapshot() ipc.Snapshot {
 		BlockCostUSD:     s.blockCostUSD,
 		BlockCostByModel: s.blockCostByModel,
 		ForecastNote:     s.forecast,
+		PaceState:        string(s.paceState),
 		LabelMode:        s.labelMode,
+		TimeFormat:       s.timeFormat,
 		HasAPI:           s.apiLastGood != nil,
 		APIStale:         s.apiStale,
 		APILastError:     s.apiLastError,

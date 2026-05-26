@@ -12,15 +12,17 @@ import (
 
 // Cmd values accepted by the daemon.
 const (
-	CmdStatus   = "status"
-	CmdRefresh  = "refresh"
-	CmdSetLabel = "set-label"
-	CmdQuit     = "quit"
+	CmdStatus        = "status"
+	CmdRefresh       = "refresh"
+	CmdSetLabel      = "set-label"
+	CmdSetTimeFormat = "set-time-format"
+	CmdQuit          = "quit"
 )
 
 type Request struct {
 	Cmd string `json:"cmd"`
 	// Value is a free-form payload. For CmdSetLabel: "5h" or "both".
+	// For CmdSetTimeFormat: "12h" or "24h".
 	Value string `json:"value,omitempty"`
 }
 
@@ -51,7 +53,11 @@ type Snapshot struct {
 	BlockCostUSD     float64         `json:"block_cost_usd"`
 	BlockCostByModel []CostBreakdown `json:"block_cost_by_model,omitempty"`
 	ForecastNote     string          `json:"forecast,omitempty"`
+	// PaceState classifies burn rate against the remaining 5h budget.
+	// Values: "", "idle", "on-pace", "hot", "capped".
+	PaceState        string          `json:"pace_state,omitempty"`
 	LabelMode        string          `json:"label_mode"`
+	TimeFormat       string          `json:"time_format"` // "12h" or "24h"
 	// HasAPI is true once we've successfully called the OAuth usage API at
 	// least once and cached its result. When false, FiveHour and SevenDay
 	// percentages are not meaningful — the icon should render an error state.

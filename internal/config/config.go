@@ -13,7 +13,8 @@ import (
 type Config struct {
 	APIRefreshSeconds   int    `toml:"api_refresh_seconds"`
 	JSONLRefreshSeconds int    `toml:"jsonl_refresh_seconds"`
-	LabelMode           string `toml:"label_mode"` // "5h" or "both"
+	LabelMode           string `toml:"label_mode"`  // "5h" or "both"
+	TimeFormat          string `toml:"time_format"` // "12h" or "24h"
 	ProxyURL            string `toml:"proxy_url"`
 	NotifyThresholds    []int  `toml:"notify_thresholds"`
 }
@@ -24,6 +25,7 @@ func Default() Config {
 		APIRefreshSeconds:   300, // 5 min: Anthropic rate-limits aggressive polling
 		JSONLRefreshSeconds: 30,
 		LabelMode:           "5h",
+		TimeFormat:          "12h",
 		ProxyURL:            "",
 		NotifyThresholds:    []int{80, 95},
 	}
@@ -80,6 +82,9 @@ func applyDefaults(c *Config) {
 	}
 	if c.LabelMode == "" {
 		c.LabelMode = d.LabelMode
+	}
+	if c.TimeFormat != "12h" && c.TimeFormat != "24h" {
+		c.TimeFormat = d.TimeFormat
 	}
 	if c.NotifyThresholds == nil {
 		c.NotifyThresholds = d.NotifyThresholds

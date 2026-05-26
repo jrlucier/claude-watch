@@ -9,6 +9,54 @@ import (
 // to a current spike, long enough to ride out one-message lulls.
 const burnWindow = 10 * time.Minute
 
+// PaceState is the burn-vs-budget classification surfaced to the tray.
+// It's distinct from utilization severity (how full the bucket is) and
+// captures whether the current pace is taking the user past the cap before
+// the window resets.
+type PaceState string
+
+const (
+	PaceUnknown PaceState = ""        // not enough data to classify
+	PaceIdle    PaceState = "idle"    // burn rate effectively zero
+	PaceOnPace  PaceState = "on-pace" // burning, but projected to clear reset
+	PaceHot     PaceState = "hot"     // will hit cap before reset at current pace
+	PaceCapped  PaceState = "capped"  // already at 100%
+)
+
+// idleBurnFloor — burn rates below this (tokens/min) read as "not working."
+// Active Claude Code sessions sit in the 5k-50k tok/min range; sub-500 is
+// background cache hits and minor tool messages, not real work.
+const idleBurnFloor = 500.0
+
+// ComputePace classifies the current burn-vs-budget situation. Returns
+// PaceUnknown when there's not enough data (no API utilization, no reset
+// time, or the block just started so the per-minute rise is noisy).
+func ComputePace(util, burnTokPerMin float64, resetsAt *time.Time, now time.Time) PaceState {
+	if util >= 100 {
+		return PaceCapped
+	}
+	if burnTokPerMin < idleBurnFloor {
+		return PaceIdle
+	}
+	if resetsAt == nil || util <= 0 {
+		return PaceUnknown
+	}
+	start := resetsAt.Add(-BlockDuration)
+	elapsed := now.Sub(start).Minutes()
+	if elapsed < 1 {
+		return PaceUnknown
+	}
+	risePerMin := util / elapsed
+	if risePerMin <= 0 {
+		return PaceUnknown
+	}
+	minToFull := (100 - util) / risePerMin
+	if now.Add(time.Duration(minToFull) * time.Minute).After(*resetsAt) {
+		return PaceOnPace
+	}
+	return PaceHot
+}
+
 // BurnRateTokensPerMin returns the recent (~10 min) total-token-per-minute
 // burn rate across all the records given. Returns 0 when there's not enough
 // history to compute a meaningful rate.
