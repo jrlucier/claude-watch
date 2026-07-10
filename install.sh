@@ -254,6 +254,7 @@ maybe_install_autostart() {
   cat > "$unit_path" <<EOF
 [Unit]
 Description=Claude Code usage tray indicator
+PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
@@ -261,7 +262,7 @@ ExecStart=$INSTALL_DIR/claude-watch start --foreground
 Restart=on-failure
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target
 EOF
   ok "Wrote $unit_path"
 
